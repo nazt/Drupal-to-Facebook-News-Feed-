@@ -11,7 +11,6 @@ function start_page() {
   $api_key = variable_get('facebook_news_feed_app_api_key', '');
   $secret_key = variable_get('facebook_news_feed_app_secret_key', '');
   $app_id = variable_get('facebook_news_feed_app_id', '');
-  $page_id = variable_get('facebook_news_feed_page_id', '');
 
   $last_redirect = variable_get('facebook_news_feed_last_redirect', '');
 
@@ -35,8 +34,15 @@ function start_page() {
         if ($access_token) {
           $write_result = drupal_write_record('fb_news_feed_user', $data);
           if ($write_result != FALSE) {
-            drupal_set_message(t('Subscribed.'));
-            drupal_add_js(array('facebook_news_feed' => array('redirectUrl' => $last_redirect)), 'setting');
+            $options = array('attributes' => array('target' => '_top'),
+                         'absolute' => true
+                        );
+            drupal_set_message(
+                               t('สมัครรับการรายงานสดเรียบร้อยแล้ว ')
+                               .l(t('ไปชุมชนคนเที่ยวเหนือ'), 'http://www.facebook.com/gonorththailand', $options)
+                              );
+            //Force Redirect
+            //drupal_add_js(array('facebook_news_feed' => array('redirectUrl' => $last_redirect)), 'setting');
           }
         }
         else {
@@ -46,8 +52,16 @@ function start_page() {
       // Exists record.
       else {
         $write_result = drupal_write_record('fb_news_feed_user', $data, array('fbuid'));
-        drupal_set_message(t('Already subscribed.'));
-        drupal_add_js(array('facebook_news_feed' => array('redirectUrl' => $last_redirect)), 'setting');
+        $options = array('attributes' => array('target' => '_top'),
+                         'absolute' => true
+                        );
+        drupal_set_message(t('สมัครรับการรายงานสดเรียบร้อยแล้ว ')
+                           .l(t('ไปชุมชนคนเที่ยวเหนือ'), 'http://www.facebook.com/gonorththailand', $options)
+                           ." "
+                           .l(t('ยกเลิกรับข่าวสาร'), 'news_feed/page/unsubscribe')
+                          );
+        //Force Redirect
+        //drupal_add_js(array('facebook_news_feed' => array('redirectUrl' => $last_redirect)), 'setting');
       }
     }
     catch (FacebookApiException $e) {
@@ -64,7 +78,6 @@ function start_page() {
   // Always Add Settings.
   $fb_news_feed_data = array('apikey' => $api_key,
                        'appid' => $app_id,
-                       'pageid' => $page_id,
                        'loginUrl' => $loginUrl,
                        'logoutUrl' => $logoutUrl,
                        'user' => $fb_user,

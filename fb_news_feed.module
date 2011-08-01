@@ -37,9 +37,52 @@ function fb_news_feed_menu() {
     'type' => MENU_CALLBACK,
   );
 
+  $items['news_feed/page/unsubscribe'] = array(
+    'title' => t('Unsubscribe.'),
+    'page callback' => 'facebook_news_feed_unscribe',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+  );
+
   return $items;
 }
 
+/**
+ *  Unsubscribe to wall
+ */
+function facebook_news_feed_unscribe() {
+  require_once(drupal_get_path('module', 'fb_news_feed') . '/lib/php-sdk/src/facebook.php');
+
+  $secret_key = variable_get('facebook_news_feed_app_secret_key', '');
+  $app_id = variable_get('facebook_news_feed_app_id', '');
+
+  $last_redirect = variable_get('facebook_news_feed_last_redirect', '');
+
+  // Create our Application instance (replace this with your appId and secret).
+  $facebook = new Facebook(array(
+    'appId'  => $app_id,
+    'secret' => $secret_key,
+  ));
+
+  // Get User ID
+  $fb_user = $facebook->getUser();
+  if ($fb_user) {
+    $query_result = db_query("DELETE FROM {fb_news_feed_user} WHERE fbuid='%s'", $fb_user);
+    if ($query_result) {
+       $link = l('ไปชุมชนคนเที่ยวเหนือ', 'http://www.facebook.com/gonorththailand', array('absolute' => true, 'attributes' => array('target' => '_top')));
+       return sprintf("%s %s", t('Unsubscribed.'), $link) ;
+    }
+    else {
+       return t('Try again.');
+    }
+  }
+  else {
+    return 'error no facebook session.';
+  }
+}
+/**
+ *  List Members Page
+ */
 function facebook_news_feed_list_members() {
   require_once(drupal_get_path('module', 'fb_news_feed') . '/lib/php-sdk/src/facebook.php');
   $secret_key = variable_get('facebook_news_feed_app_secret_key', '');
@@ -52,20 +95,25 @@ function facebook_news_feed_list_members() {
   $access_token = variable_get('facebook_news_feed_access_token', '');
   $facebook->setAccessToken($access_token);
   $result = db_query("SELECT * FROM {fb_news_feed_user} WHERE photo_id_posted IS NULL OR photo_id_posted != '%s'", $current_photo_id_to_post);
-  $header = array(t('Key'), t('FBUID'), t('Name'), t('Last Post ID')); 
+  $header = array(t('Key'), t('FBUID'), t('Name'), t('Last Post ID'));
   $key = 1;
   while ($row = db_fetch_array($result)) {
-    //$facebook->setAccessToken($row['access_token']);
     try {
       // Proceed knowing you have a logged in user who's authenticated.
       $user_profile = $facebook->api('/'.$row['fbuid']);
-    } catch (FacebookApiException $e) {
+    }
+    catch (FacebookApiException $e) {
       error_log($e);
     }
-    $all_users[] = array('key' => $key, 'fbuid' => $row['fbuid'], 'Name' => l($user_profile['name'], $user_profile['link']), 'last_posted_id' => $row['photo_id_posted']);;
-   $key +=1;
-  }
-  return theme_table($header, $all_users); 
+
+    $all_users[] = array('key' => $key,
+                         'fbuid' => $row['fbuid'],
+                         'Name' => l($user_profile['name'], $user_profile['link']),
+                         'last_posted_id' => $row['photo_id_posted']
+                        );
+    $key +=1;
+  } // While
+  return theme_table($header, $all_users);
 }
 /**
  *  Page Post Wall For Cron
@@ -77,7 +125,7 @@ function facebook_news_feed_post_wall() {
     $current_photo_id_to_post = $photo_info['object_id'];
   }
   else {
-    return 'Task Cancelled.';
+    return t('Task Cancelled.');
   }
 
   $result = db_query("SELECT * FROM {fb_news_feed_user} WHERE photo_id_posted IS NULL OR photo_id_posted != '%s'", $current_photo_id_to_post);
@@ -132,8 +180,10 @@ function facebook_news_feed_post_wall() {
 /**
  * Implementation of hook_init().
  */
-function facebook_news_feed_init() {
-
+function fb_news_feed_init() {
+  if (arg(0) == 'news_feed' && arg(2) == 'unsubscribe') {
+    $GLOBALS['conf']['cache'] = FALSE;
+  }
 }
 
 /**
@@ -206,32 +256,5 @@ function fb_news_feed_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
         variable_set('fb_news_feed_wall_post', serialize($to_wall_post));
       }
     break;
-  }
-}
-
-function _getPhotoInfo($photo_id, &$facebook = null) {
-  if ($facebook != null) {
-    $node_path = '/'.$photo_id;
-    $photo = $facebook->api($node_path);
-    $ret = array('name' => $photo['name'], 'link' => $photo['link']);
-    return $ret;
-  }
-}
-
-function _postToUserWall($photo_info) {
-  $photo_url = "http://gonorth-phase2.opendream.in.th/sites/default/files/genesis_gonorth_logo.png";
-  $current_photo_id_to_post;
-  $result = db_query("SELECT * FROM {fb_news_feed_user} WHERE photo_id_posted != '%s'", $current_photo_id_to_post);
-  while ($row = db_fetch_array($result)) {
-    $user_id = $row['fbuid'];
-    // POST to Graph API feed endpoint, which is the user's Wall
-    $graph_url= "https://graph.facebook.com/" . $user_id . "/feed?"
-      . "&message=" . urlencode("MESSAGE")
-      . "&caption=" . urlencode("CAPTION")
-      . "&name=" . urlencode("NAME")
-      . "&link=" . urlencode($photo_info['link'])
-      . "&picture=" . $photo_url
-      . "&method=POST"
-      . "&access_token=" .$access_token;
   }
 }
