@@ -1,0 +1,176 @@
+<?php
+/**
+ * Implementation of hook_menu().
+ */
+function fb_news_feed_menu() {
+  $items['admin/settings/fb_news_feed'] = array(
+      'title' => 'Facebook News Feed',
+      'description' => 'Facebook util settings',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('facebook_news_feed_settings_form'),
+      'access arguments' => array('administer site configuration'),
+      'type' => MENU_NORMAL_ITEM,
+      'file' => 'fb_news_feed.admin.inc'
+  );
+$items['news_feed/page/startup'] = array(
+    'title' => t('Facebook News Feed'),
+    'page callback' => 'start_page',
+    'access callback' => TRUE,
+    'file' => 'start_page.inc',
+    'type' => MENU_CALLBACK,
+  );
+$items['news_feed/page/post_wall'] = array(
+    'title' => t('Facebook News Feed Post Wall'),
+    'page callback' => 'facebook_news_feed_post_wall',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ *  Page Post Wall For Cron
+ */
+function facebook_news_feed_post_wall() {
+  require_once(drupal_get_path('module', 'fb_news_feed') . '/lib/php-sdk/src/facebook.php');
+  $photo_info = unserialize(variable_get('fb_news_feed_wall_post', null));
+  if ($photo_info != false) {
+    $current_photo_id_to_post = $photo_info['object_id'];
+  }
+
+  $result = db_query("SELECT * FROM {fb_news_feed_user} WHERE photo_id_posted IS NULL OR photo_id_posted != '%s'", $current_photo_id_to_post);
+
+  $need_post = "No FBUID to Post Wall.";
+
+  while ($row = db_fetch_array($result)) {
+    $need_post = "";
+    $user_id = $row['fbuid'];
+    $name =  $photo_info['title'];
+    $caption = $photo_info['caption'];
+    $picture = $photo_info['picture'];
+    $access_token = $row['access_token'];
+    $link = $photo_info['link'];
+
+    $graph_url= "https://graph.facebook.com/" . $user_id . "/feed?"
+      // . "&message=" . urlencode("MESSAGE") //
+      . "&caption=" . urlencode($caption)
+      . "&name=" . urlencode($name)
+      . "&link=" . urlencode($link)
+      . "&picture=" . $picture
+      . "&method=POST"
+      . "&access_token=" .$access_token;
+    $posted_object = json_decode(file_get_contents($graph_url));
+    if (!empty($posted_object->id)) {
+      $data = array('fbuid' => $user_id, 'photo_id_posted' => $photo_info['object_id']);
+      $write_result = drupal_write_record('fb_news_feed_user', $data, array('fbuid'));
+      drupal_set_message('Post wall to FBUID: '. $user_id);
+    }
+  }
+  return $need_post;
+}
+/**
+ * Implementation of hook_init().
+ */
+function facebook_news_feed_init() {
+
+}
+
+/**
+  * Implementation of hook_perm()
+  */
+function facebook_news_feed_perm() {
+  return array('administer facebook startup kit');;
+}
+
+function fb_news_feed_fsk_verify_js_callback() {
+  return TRUE;
+}
+
+function fb_news_feed_fsk_verify_js() {
+  $target = variable_get('facebook_news_feed_redirect_to_page', 'http://');
+  Header("Location: ${target}");
+  return;
+}
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function fb_news_feed_form_alter(&$form, &$form_state, $form_id) {
+  switch ($form_id) {
+    case 'content_profile_node_form':
+    break;
+
+  }
+}
+function fb_news_feed_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
+  switch($op) {
+    case 'insert':
+      if($node->type == 'news_to_facebook') {
+        require_once(drupal_get_path('module', 'fb_news_feed') . '/lib/php-sdk/src/facebook.php');
+        $caption = $node->field_caption[0]['value'];
+        $file_path = $node->field_gonorth_news_feed_picture[0]['filepath'];
+
+        $secret_key = variable_get('facebook_news_feed_app_secret_key', '');
+        $app_id = variable_get('facebook_news_feed_app_id', '');
+
+        // Create our Application instance (replace this with your appId and secret).
+        $facebook = new Facebook(array(
+          'appId'  => $app_id,
+          'secret' => $secret_key,
+        ));
+        $access_token = variable_get('facebook_news_feed_access_token', '');
+        $facebook->setAccessToken($access_token);
+        $facebook->setFileUploadSupport(TRUE);
+        $aid = variable_get('facebook_news_feed_aid', '');
+        $uid = variable_get('facebook_news_feed_uid', '');
+        $param = array (
+          'method' => 'photos.upload',
+          'aid' => $aid,
+          'caption' => $caption,
+          'message' => 'Message',
+          'uid' => $uid,
+          'source' => '@' . realpath($file_path),
+          'format' => 'json',
+        );
+        $result_photo = $facebook->api($param);
+        $to_wall_post = array(
+          'link' => $result_photo['link'],
+          'image_path' => $file_path,
+          'picture' => url($file_path, array('absolute' => TRUE)),
+          'caption' => $caption,
+          'object_id' => $result_photo['object_id'],
+          'title' =>  $node->title
+        );
+        variable_set('fb_news_feed_wall_post', serialize($to_wall_post));
+      }
+    break;
+  }
+}
+
+function _getPhotoInfo($photo_id, &$facebook = null) {
+  if ($facebook != null) {
+    $node_path = '/'.$photo_id;
+    $photo = $facebook->api($node_path);
+    $ret = array('name' => $photo['name'], 'link' => $photo['link']);
+    return $ret;
+  }
+}
+
+function _postToUserWall($photo_info) {
+  $photo_url = "http://gonorth-phase2.opendream.in.th/sites/default/files/genesis_gonorth_logo.png";
+  $current_photo_id_to_post;
+  $result = db_query("SELECT * FROM {fb_news_feed_user} WHERE photo_id_posted != '%s'", $current_photo_id_to_post);
+  while ($row = db_fetch_array($result)) {
+    $user_id = $row['fbuid'];
+    // POST to Graph API feed endpoint, which is the user's Wall
+    $graph_url= "https://graph.facebook.com/" . $user_id . "/feed?"
+      . "&message=" . urlencode("MESSAGE")
+      . "&caption=" . urlencode("CAPTION")
+      . "&name=" . urlencode("NAME")
+      . "&link=" . urlencode($photo_info['link'])
+      . "&picture=" . $photo_url
+      . "&method=POST"
+      . "&access_token=" .$access_token;
+  }
+}

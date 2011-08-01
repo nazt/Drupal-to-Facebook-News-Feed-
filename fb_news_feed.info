@@ -1,0 +1,6 @@
+name = Facebook News Feed
+description = Admin publish news to feed book page/user
+package = Opendream
+core = 6.x
+version = 6.x-0.1-alpha
+

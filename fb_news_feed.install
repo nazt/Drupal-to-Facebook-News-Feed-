@@ -1,0 +1,24 @@
+<?php
+
+/**
+ *  Implementation of hook_schema()
+ */
+
+function fb_news_feed_schema() {
+  $schema['fb_news_feed_user'] = array(
+    'fields' => array('fbuid' => array('type' => 'varchar', 'length' => 32, 'not null' => true),
+               'access_token' => array('type' => 'varchar', 'length' => 255, 'not null' => false),
+               'photo_id_posted' => array('type' => 'varchar', 'length' => 255, 'not null' => false),
+    ),
+    'primary key' => array('fbuid'),
+  );
+  return $schema;
+}
+
+function fb_news_feed_install() {
+  drupal_install_schema('fb_news_feed');
+}
+
+function fb_news_feed_uninstall() {
+  drupal_uninstall_schema('fb_news_feed');
+}
