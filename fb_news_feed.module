@@ -12,23 +12,61 @@ function fb_news_feed_menu() {
       'type' => MENU_NORMAL_ITEM,
       'file' => 'fb_news_feed.admin.inc'
   );
-$items['news_feed/page/startup'] = array(
+
+  $items['news_feed/page/startup'] = array(
     'title' => t('Facebook News Feed'),
     'page callback' => 'start_page',
     'access callback' => TRUE,
     'file' => 'start_page.inc',
     'type' => MENU_CALLBACK,
   );
-$items['news_feed/page/post_wall'] = array(
+
+  $items['news_feed/page/post_wall'] = array(
     'title' => t('Facebook News Feed Post Wall'),
     'page callback' => 'facebook_news_feed_post_wall',
     'access callback' => TRUE,
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['news_feed/page/list_members'] = array(
+    'title' => t('Facebook List Members.'),
+    'page callback' => 'facebook_news_feed_list_members',
+    'access callback' => TRUE,
+    'access arguments' => array('administer site configuration'),
     'type' => MENU_CALLBACK,
   );
 
   return $items;
 }
 
+function facebook_news_feed_list_members() {
+  require_once(drupal_get_path('module', 'fb_news_feed') . '/lib/php-sdk/src/facebook.php');
+  $secret_key = variable_get('facebook_news_feed_app_secret_key', '');
+  $app_id = variable_get('facebook_news_feed_app_id', '');
+  $facebook = new Facebook(array(
+    'appId'  => $app_id,
+    'secret' => $secret_key,
+  ));
+
+  $access_token = variable_get('facebook_news_feed_access_token', '');
+  $facebook->setAccessToken($access_token);
+  $result = db_query("SELECT * FROM {fb_news_feed_user} WHERE photo_id_posted IS NULL OR photo_id_posted != '%s'", $current_photo_id_to_post);
+  $header = array(t('Key'), t('FBUID'), t('Name'), t('Last Post ID')); 
+  $key = 1;
+  while ($row = db_fetch_array($result)) {
+    //$facebook->setAccessToken($row['access_token']);
+    try {
+      // Proceed knowing you have a logged in user who's authenticated.
+      $user_profile = $facebook->api('/'.$row['fbuid']);
+    } catch (FacebookApiException $e) {
+      error_log($e);
+    }
+    $all_users[] = array('key' => $key, 'fbuid' => $row['fbuid'], 'Name' => l($user_profile['name'], $user_profile['link']), 'last_posted_id' => $row['photo_id_posted']);;
+   $key +=1;
+  }
+  return theme_table($header, $all_users); 
+}
 /**
  *  Page Post Wall For Cron
  */
@@ -38,11 +76,15 @@ function facebook_news_feed_post_wall() {
   if ($photo_info != false) {
     $current_photo_id_to_post = $photo_info['object_id'];
   }
+  else {
+    return 'Task Cancelled.';
+  }
 
   $result = db_query("SELECT * FROM {fb_news_feed_user} WHERE photo_id_posted IS NULL OR photo_id_posted != '%s'", $current_photo_id_to_post);
 
-  $need_post = "No FBUID to Post Wall.";
+  $need_post = "Empty Task.";
 
+  $posted_fbuid = array();
   while ($row = db_fetch_array($result)) {
     $need_post = "";
     $user_id = $row['fbuid'];
@@ -60,14 +102,32 @@ function facebook_news_feed_post_wall() {
       . "&picture=" . $picture
       . "&method=POST"
       . "&access_token=" .$access_token;
-    $posted_object = json_decode(file_get_contents($graph_url));
-    if (!empty($posted_object->id)) {
-      $data = array('fbuid' => $user_id, 'photo_id_posted' => $photo_info['object_id']);
-      $write_result = drupal_write_record('fb_news_feed_user', $data, array('fbuid'));
-      drupal_set_message('Post wall to FBUID: '. $user_id);
+    if (!in_array($user_id, $posted_fbuid)) {
+      $posted_object = json_decode(file_get_contents($graph_url));
+      $posted_id = $posted_object->id;
+      if (!empty($posted_id)) {
+        watchdog('post_wall', $user_id . ' posted: ' . $posted_id);
+        $posted_fbuid[] = $user_id;
+        $data = array('fbuid' => $user_id, 'photo_id_posted' => $photo_info['object_id']);
+        $write_result = drupal_write_record('fb_news_feed_user', $data, array('fbuid'));
+        if ($write_result != false) {
+          drupal_set_message('Post wall to FBUID: '. $user_id);
+        }
+        else {
+          watchdog('post_wall', $user_id . ' updated failed' . $posted_id);
+        }
+      }
+      else {
+        watchdog('post_wall', $user_id . ' posted: ' . $posted_id);
+      }
     }
   }
-  return $need_post;
+  if ($need_post == "Empty Task.") {
+    variable_set('fb_news_feed_wall_post', null);
+    watchdog('post_wall', "CLEAR POST");
+  }
+  watchdog('post_wall_result', $need_post. print_r($posted_fbuid, 1));
+  return "<br> <br> <br>". $need_post . " ". (print_r($posted_fbuid, 1));
 }
 /**
  * Implementation of hook_init().
@@ -98,7 +158,8 @@ function fb_news_feed_fsk_verify_js() {
  */
 function fb_news_feed_form_alter(&$form, &$form_state, $form_id) {
   switch ($form_id) {
-    case 'content_profile_node_form':
+    case 'news_to_facebook_node_form':
+      $form['title']['#default_value'] = 'กิจกรรมเดินทางไปกับชุมชนคนเที่ยวเหนือ';
     break;
 
   }
